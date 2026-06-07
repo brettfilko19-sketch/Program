@@ -548,9 +548,9 @@ const PROGRAM = [
     label: 'Day 1',
     focus: 'Squat',
     exercises: [
-      { id: 'squat',   name: 'Squat',          minReps: 4, maxReps: 6,  weightStep: 2.5 },
-      { id: 'dips',    name: 'Dips',            minReps: 6, maxReps: 10, weightStep: 2.5 },
-      { id: 'pullups', name: 'Pull-ups',         minReps: 4, maxReps: 8,  weightStep: 2.5 },
+      { id: 'squat',   name: 'Squat',    minReps: 4, maxReps: 6,  weightStep: 5,   bodyweight: false },
+      { id: 'dips',    name: 'Dips',     minReps: 6, maxReps: 10, weightStep: 5,   bodyweight: true  },
+      { id: 'pullups', name: 'Pull-ups', minReps: 4, maxReps: 8,  weightStep: 5,   bodyweight: true  },
     ]
   },
   {
@@ -558,9 +558,9 @@ const PROGRAM = [
     label: 'Day 2',
     focus: 'Deadlift',
     exercises: [
-      { id: 'deadlift', name: 'Deadlift',  minReps: 3, maxReps: 5,  weightStep: 5 },
-      { id: 'ohp',      name: 'OHP',        minReps: 4, maxReps: 6,  weightStep: 2.5 },
-      { id: 'chinups',  name: 'Chin-ups',   minReps: 4, maxReps: 8,  weightStep: 2.5 },
+      { id: 'deadlift', name: 'Deadlift', minReps: 3, maxReps: 5, weightStep: 10,  bodyweight: false },
+      { id: 'ohp',      name: 'OHP',      minReps: 4, maxReps: 6, weightStep: 5,   bodyweight: false },
+      { id: 'chinups',  name: 'Chin-ups', minReps: 4, maxReps: 8, weightStep: 5,   bodyweight: true  },
     ]
   },
   {
@@ -568,9 +568,9 @@ const PROGRAM = [
     label: 'Day 3',
     focus: 'Bench',
     exercises: [
-      { id: 'bench',    name: 'Bench',              minReps: 4, maxReps: 6,  weightStep: 2.5 },
-      { id: 'row',      name: 'Row',                 minReps: 6, maxReps: 8,  weightStep: 2.5 },
-      { id: 'frontsq',  name: 'Single-Leg/Front Sq', minReps: 6, maxReps: 10, weightStep: 2.5 },
+      { id: 'bench',   name: 'Bench',              minReps: 4, maxReps: 6,  weightStep: 5,  bodyweight: false },
+      { id: 'row',     name: 'Row',                minReps: 6, maxReps: 8,  weightStep: 5,  bodyweight: false },
+      { id: 'frontsq', name: 'Single-Leg/Front Sq', minReps: 6, maxReps: 10, weightStep: 5, bodyweight: false },
     ]
   }
 ];
@@ -595,8 +595,16 @@ function fmt(d) {
 }
 
 function e1rm(weight, reps) {
-  if (!weight || !reps) return 0;
+  if (reps == null || reps <= 0) return 0;
+  // weight can be 0 for bodyweight — still compute using weight as-is (0 + added)
   return Math.round(weight * (1 + reps / 30));
+}
+
+// Display helper: "BW" / "BW + 25 lbs" / "135 lbs"
+function fmtWeight(weight, bodyweight) {
+  if (!bodyweight) return weight + ' lbs';
+  if (weight === 0) return 'BW';
+  return 'BW + ' + weight + ' lbs';
 }
 
 // Get last session data for a specific exercise
@@ -604,7 +612,8 @@ function getLastForExercise(exId) {
   for (let i = db.sessions.length - 1; i >= 0; i--) {
     const s = db.sessions[i];
     const ex = s.exercises && s.exercises.find(e => e.id === exId);
-    if (ex && ex.weight) return ex;
+    // weight can be 0 (bodyweight) — check reps > 0 as the indicator a set was logged
+    if (ex && ex.reps > 0) return ex;
   }
   return null;
 }
@@ -615,8 +624,8 @@ function countStalls(exId, maxReps) {
   for (let i = db.sessions.length - 1; i >= 0; i--) {
     const s = db.sessions[i];
     const ex = s.exercises && s.exercises.find(e => e.id === exId);
-    if (!ex || !ex.weight) break;
-    if (ex.reps >= maxReps) break; // progressed
+    if (!ex || ex.reps <= 0) break; // no data for this exercise in this session
+    if (ex.reps >= maxReps) break; // progressed — stop counting stalls
     stalls++;
     if (stalls >= 3) break;
   }
@@ -628,13 +637,23 @@ function getSuggestion(ex) {
   const stalls = countStalls(ex.id, ex.maxReps);
 
   if (!last) {
+    if (ex.bodyweight) {
+      return { text: `First session — log bodyweight reps (weight = 0) or add extra lbs if you're weighted. Target: ${ex.minReps}–${ex.maxReps} reps.`, type: 'neutral' };
+    }
     return { text: `First session — enter a comfortable starting weight for ${ex.minReps}–${ex.maxReps} reps.`, type: 'neutral' };
   }
 
   if (stalls >= 3) {
+    if (ex.bodyweight && last.weight === 0) {
+      return {
+        text: `3 stalls at bodyweight — consider an assisted variation or just keep grinding. Target: <strong>${ex.maxReps} reps BW</strong>.`,
+        type: 'warn',
+        deload: true
+      };
+    }
     const deloadWeight = Math.round((last.weight * 0.9) / ex.weightStep) * ex.weightStep;
     return {
-      text: `3 stalls in a row — deload recommended. Try <strong>${deloadWeight} kg × ${ex.minReps} reps</strong> and rebuild.`,
+      text: `3 stalls in a row — deload recommended. Try <strong>${fmtWeight(deloadWeight, ex.bodyweight)} × ${ex.minReps} reps</strong> and rebuild.`,
       type: 'warn',
       deload: true
     };
@@ -643,13 +662,13 @@ function getSuggestion(ex) {
   if (last.reps >= ex.maxReps) {
     const nextWeight = last.weight + ex.weightStep;
     return {
-      text: `Hit ${last.reps} reps last time — add weight. Try <strong>${nextWeight} kg × ${ex.minReps} reps</strong>.`,
+      text: `Hit ${last.reps} reps last time — add weight. Try <strong>${fmtWeight(nextWeight, ex.bodyweight)} × ${ex.minReps} reps</strong>.`,
       type: 'advance'
     };
   }
 
   return {
-    text: `Last: <strong>${last.weight} kg × ${last.reps} reps</strong>. Stay at this weight and beat ${last.reps} reps (target: ${ex.maxReps}).`,
+    text: `Last: <strong>${fmtWeight(last.weight, ex.bodyweight)} × ${last.reps} reps</strong>. Stay here and beat ${last.reps} reps (target: ${ex.maxReps}).`,
     type: 'neutral'
   };
 }
@@ -705,7 +724,7 @@ function renderExercises() {
     const sugg = getSuggestion(ex);
 
     const lastLine = last
-      ? `<span>Last: <strong>${last.weight} kg</strong></span><span>Reps: <strong>${last.reps}</strong></span><span>1RM est: <strong>~${e1rm(last.weight, last.reps)} kg</strong></span>`
+      ? `<span>Last: <strong>${fmtWeight(last.weight, ex.bodyweight)}</strong></span><span>Reps: <strong>${last.reps}</strong></span><span>1RM est: <strong>~${e1rm(last.weight, last.reps)} lbs</strong></span>`
       : `<span style="color:var(--muted2)">No history yet</span>`;
 
     const suggClass = sugg.type === 'warn' ? ' warn' : '';
@@ -714,6 +733,14 @@ function renderExercises() {
       : sugg.type === 'advance'
         ? `<span class="badge badge-advance">↑ Progress</span>`
         : `<span class="badge badge-target">${ex.minReps}–${ex.maxReps} reps</span>`;
+
+    // For bodyweight exercises default the weight input to 0; for others use last weight
+    const defaultWeight = ex.bodyweight
+      ? (last ? last.weight : 0)
+      : (last ? last.weight : '');
+
+    const weightLabel = ex.bodyweight ? 'Added weight (lbs)' : 'Weight (lbs)';
+    const weightPlaceholder = ex.bodyweight ? '0 = BW' : '0';
 
     return `
       <div class="exercise-card" id="card-${ex.id}">
@@ -726,9 +753,9 @@ function renderExercises() {
           <div class="suggestion-box${suggClass}">${sugg.text}</div>
           <div class="input-row">
             <div class="input-group">
-              <label>Weight (kg)</label>
-              <input type="number" id="inp-weight-${ex.id}" placeholder="0" step="2.5" min="0"
-                value="${last ? last.weight : ''}" inputmode="decimal">
+              <label>${weightLabel}</label>
+              <input type="number" id="inp-weight-${ex.id}" placeholder="${weightPlaceholder}" step="5" min="0"
+                value="${defaultWeight}" inputmode="decimal">
             </div>
             <div class="input-group">
               <label>Reps achieved</label>
@@ -751,14 +778,19 @@ function renderExercises() {
 function saveSession() {
   const day = PROGRAM[currentDayIndex];
   const exercises = day.exercises.map(ex => {
-    const w = parseFloat(document.getElementById(`inp-weight-${ex.id}`).value) || 0;
+    const wRaw = document.getElementById(`inp-weight-${ex.id}`).value;
+    // For bodyweight exercises an empty field means 0 (bodyweight); for others empty means skipped
+    const w = ex.bodyweight
+      ? (wRaw === '' ? 0 : parseFloat(wRaw) || 0)
+      : (parseFloat(wRaw) || 0);
     const r = parseInt(document.getElementById(`inp-reps-${ex.id}`).value) || 0;
-    return { id: ex.id, name: ex.name, weight: w, reps: r };
+    return { id: ex.id, name: ex.name, weight: w, reps: r, bodyweight: ex.bodyweight };
   });
 
-  const hasData = exercises.some(e => e.weight > 0 || e.reps > 0);
+  // Valid if at least one exercise has reps entered (weight=0 is fine for bodyweight)
+  const hasData = exercises.some(e => e.reps > 0);
   if (!hasData) {
-    showToast('Enter at least one lift first');
+    showToast('Enter reps for at least one lift');
     return;
   }
 
@@ -802,10 +834,10 @@ function renderHistory() {
         <span class="history-chevron">▾</span>
       </div>
       <div class="history-body">
-        ${s.exercises.filter(e => e.weight || e.reps).map(e => `
+        ${s.exercises.filter(e => e.reps > 0).map(e => `
           <div class="history-ex">
             <div class="history-ex-name">${e.name}</div>
-            <div class="history-ex-val">${e.weight > 0 ? e.weight + ' kg' : '—'} × ${e.reps > 0 ? e.reps + ' reps' : '—'}${e.weight && e.reps ? ` <span style="color:var(--muted);font-size:13px">(~${e1rm(e.weight,e.reps)} kg 1RM)</span>` : ''}</div>
+            <div class="history-ex-val">${fmtWeight(e.weight, e.bodyweight)} × ${e.reps} reps${e.reps > 0 ? ` <span style="color:var(--muted);font-size:13px">(~${e1rm(e.weight, e.reps)} lbs 1RM)</span>` : ''}</div>
           </div>
         `).join('')}
         ${s.notes ? `<div class="history-notes">"${s.notes}"</div>` : ''}
@@ -863,8 +895,8 @@ function renderCharts() {
   statsGrid.innerHTML = `
     <div class="stat-card"><div class="stat-label">Sessions</div><div class="stat-value" style="color:var(--accent)">${totalSessions}</div></div>
     <div class="stat-card"><div class="stat-label">Last session</div><div class="stat-value" style="color:var(--blue)">${daysSince}</div></div>
-    <div class="stat-card"><div class="stat-label">Top est. 1RM</div><div class="stat-value" style="color:var(--green)">${best1rm > 0 ? best1rm + ' kg' : '—'}</div></div>
-    <div class="stat-card"><div class="stat-label">Last vol.</div><div class="stat-value" style="color:var(--orange)">${lastVol > 0 ? lastVol + ' kg' : '—'}</div></div>
+    <div class="stat-card"><div class="stat-label">Top est. 1RM</div><div class="stat-value" style="color:var(--green)">${best1rm > 0 ? best1rm + ' lbs' : '—'}</div></div>
+    <div class="stat-card"><div class="stat-label">Last vol.</div><div class="stat-value" style="color:var(--orange)">${lastVol > 0 ? lastVol + ' lbs' : '—'}</div></div>
   `;
 
   // Exercise picker
@@ -893,11 +925,12 @@ function drawChart() {
   const canvas = document.getElementById('progress-chart');
   const ctx = canvas.getContext('2d');
 
-  // Gather data points
+  // Gather data points — weight can be 0 for bodyweight exercises, check reps instead
   const points = [];
+  const chartEx = getAllExercises().find(e => e.id === selectedChartExercise);
   db.sessions.forEach(s => {
     const ex = s.exercises && s.exercises.find(e => e.id === selectedChartExercise);
-    if (ex && ex.weight && ex.reps) {
+    if (ex && ex.reps > 0) {
       points.push({ date: new Date(s.date), value: e1rm(ex.weight, ex.reps), weight: ex.weight, reps: ex.reps });
     }
   });
@@ -931,7 +964,7 @@ function drawChart() {
     data: {
       labels: points.map(p => p.date.toLocaleDateString('en-CA', { month:'short', day:'numeric' })),
       datasets: [{
-        label: 'Est. 1RM (kg)',
+        label: 'Est. 1RM (lbs)',
         data: points.map(p => p.value),
         borderColor: '#e8ff47',
         backgroundColor: 'rgba(232,255,71,0.07)',
@@ -956,7 +989,8 @@ function drawChart() {
           callbacks: {
             label: (ctx) => {
               const p = points[ctx.dataIndex];
-              return ` ${p.weight} kg × ${p.reps} reps = ~${p.value} kg`;
+              const wStr = chartEx && chartEx.bodyweight ? fmtWeight(p.weight, true) : p.weight + ' lbs';
+              return ` ${wStr} × ${p.reps} reps = ~${p.value} lbs`;
             }
           }
         }
