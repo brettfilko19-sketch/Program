@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Workout Tracker</title>
+    <style>
+        body { font-family: sans-serif; max-width: 600px; margin: 20px auto; padding: 0 10px; }
+        .day { border: 1px solid #ccc; padding: 15px; margin-bottom: 10px; border-radius: 8px; }
+        input { width: 60px; }
+        button { margin-top: 10px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>Weekly Workout Tracker</h1>
+    <div id="tracker"></div>
+    <button onclick="saveData()">Save Progress</button>
+
+    <script>
+        const workout = [
+            { day: "Day 1 (Squat)", exercises: ["Squat", "Dips", "Pull-ups"] },
+            { day: "Day 2 (Deadlift)", exercises: ["Deadlift", "OHP", "Chin-ups"] },
+            { day: "Day 3 (Bench)", exercises: ["Bench", "Row", "Single-Leg/Front Squat"] }
+        ];
+
+        const container = document.getElementById('tracker');
+        workout.forEach((d, i) => {
+            container.innerHTML += `<div class="day"><h3>${d.day}</h3>` + 
+                d.exercises.map(ex => `<div>${ex}: <input type="text" class="data" data-day="${i}" placeholder="kg x reps"></div>`).join('') + `</div>`;
+        });
+
+        function saveData() {
+            const inputs = document.querySelectorAll('.data');
+            const data = Array.from(inputs).map(i => i.value);
+            localStorage.setItem('workoutData', JSON.stringify(data));
+            alert('Progress Saved!');
+        }
+
+        // Load data on start
+        const saved = JSON.parse(localStorage.getItem('workoutData'));
+        if(saved) {
+            document.querySelectorAll('.data').forEach((input, i) => input.value = saved[i] || '');
+        }
+    </script>
+</body>
+</html>
